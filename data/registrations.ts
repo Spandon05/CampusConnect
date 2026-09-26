@@ -1,6 +1,4 @@
-// Seed data for registrations, so the "My Registrations" and Organizer
-// pages have something real to display before participants build the
-// actual registration flow (Task 2 and Task 3).
+import { getEventById, isPastEvent, isFullEvent } from './events'
 
 export type RegistrationStatus = 'confirmed' | 'cancelled'
 
@@ -9,13 +7,9 @@ export interface Registration {
   eventId: string
   studentId: string
   status: RegistrationStatus
-  registeredAt: string // ISO date string
+  registeredAt: string 
 }
 
-// NOTE FOR PARTICIPANTS: this array is the "database" of registrations.
-// Task 2 (Registration) means pushing new items into this array when a
-// student registers. Task 3 (Cancellation) means updating an item's
-// status here. Keep using this same array — don't create a second store.
 export const registrations: Registration[] = [
   {
     id: 'reg-01',
@@ -40,7 +34,86 @@ export const registrations: Registration[] = [
   },
 ]
 
-/** Simple lookup used by the placeholder "My Registrations" page. */
-export function getRegistrationsForStudent(studentId: string): Registration[] {
-  return registrations.filter((reg) => reg.studentId === studentId)
+export function getRegistrationsForStudent(studentId: string) {
+  return registrations.filter(reg => {
+    // 1. Must belong to the student
+    if (reg.studentId !== studentId) return false;
+    
+    // 2. Hide registrations if the organizer cancelled the underlying event
+    const event = getEventById(reg.eventId);
+    if (!event || event.cancelled) return false;
+    
+    // 3. Exclude registrations that the student has already cancelled
+    if (reg.status === 'cancelled') return false; 
+
+    return true;
+  });
+}
+
+export function registerForEvent(eventId: string, studentId: string): Registration {
+  const event = getEventById(eventId);
+  
+  if (!event) throw new Error('Event not found.');
+  if (event.cancelled) throw new Error('Cannot register for a cancelled event.');
+  if (isPastEvent(event)) throw new Error('Cannot register for a past event.');
+
+  // Check if seat count is 0 or less
+  if (event.seatsAvailable <= 0) {
+    throw new Error('This event is completely full.');
+  }
+
+  // Prevent duplicate registrations
+  const alreadyRegistered = registrations.find(
+    (r) => r.eventId === eventId && r.studentId === studentId && r.status === 'confirmed'
+  );
+  
+  if (alreadyRegistered) {
+    throw new Error('You are already registered for this event.');
+  }
+
+  // Mathematically decrement the seat count
+  event.seatsAvailable -= 1;
+
+  const newRegistration: Registration = {
+    id: `reg-${Date.now()}`,
+    eventId,
+    studentId,
+    status: 'confirmed',
+    registeredAt: new Date().toISOString()
+  };
+  
+  registrations.push(newRegistration);
+  return newRegistration;
+}
+
+export function cancelRegistration(registrationId: string, studentId: string): Registration {
+  const registration = registrations.find((reg) => reg.id === registrationId);
+  
+  if (!registration) {
+    throw new Error('Registration not found.');
+  }
+
+  if (registration.studentId !== studentId) {
+    throw new Error('You can only cancel your own registrations.');
+  }
+
+  if (registration.status === 'cancelled') {
+    throw new Error('This registration is already cancelled.');
+  }
+
+  const event = getEventById(registration.eventId);
+  
+  if (!event) {
+    throw new Error('Event not found.');
+  }
+
+  if (isPastEvent(event)) {
+    throw new Error('You cannot cancel a registration for a past event.');
+  }
+
+  // Cancel the registration and increase the available seats
+  registration.status = 'cancelled';
+  event.seatsAvailable += 1;
+
+  return registration;
 }

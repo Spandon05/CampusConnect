@@ -1,30 +1,54 @@
+'use client'
+
+import { useState, useEffect } from 'react'
 import Link from 'next/link'
-import { getEventById, isPastEvent, isFullEvent } from '@/data/events'
+import { useAuth } from '@/components/AuthProvider'
 import StatusBadge from '@/components/StatusBadge'
 import EmptyState from '@/components/EmptyState'
 
 function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString('en-IN', {
-    weekday: 'long',
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric',
+    weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
   })
 }
 
 function formatTime(iso: string) {
   return new Date(iso).toLocaleTimeString('en-IN', {
-    hour: 'numeric',
-    minute: '2-digit',
+    hour: 'numeric', minute: '2-digit',
   })
 }
 
-export default function EventDetailPage({
-  params,
-}: {
-  params: { id: string }
-}) {
-  const event = getEventById(params.id)
+export default function EventDetailPage({ params }: { params: { id: string } }) {
+  // Bring in the real authenticated user!
+  const { currentUser } = useAuth()
+  
+  const [event, setEvent] = useState<any>(null)
+  const [loadingPage, setLoadingPage] = useState(true)
+  
+  const [loading, setLoading] = useState(false)
+  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+  const [localSeats, setLocalSeats] = useState(0)
+
+  // Fetch the live event from the server
+  useEffect(() => {
+    fetch('/api/events')
+      .then(res => res.json())
+      .then(data => {
+        if (data.events) {
+          const found = data.events.find((e: any) => e.id === params.id)
+          if (found) {
+            setEvent(found)
+            setLocalSeats(found.seatsAvailable)
+          }
+        }
+        setLoadingPage(false)
+      })
+      .catch(() => setLoadingPage(false))
+  }, [params.id])
+
+  if (loadingPage) {
+    return <section className="shell" style={{ padding: '56px 0' }}><p>Loading event details...</p></section>
+  }
 
   if (!event) {
     return (
@@ -42,77 +66,86 @@ export default function EventDetailPage({
     )
   }
 
-  const past = isPastEvent(event)
-  const full = isFullEvent(event)
-  const status = event.cancelled
-    ? 'cancelled'
-    : past
-      ? 'past'
-      : full
-        ? 'full'
-        : 'open'
+  const past = new Date(event.date) < new Date()
+  const full = localSeats <= 0
+  const status = event.cancelled ? 'cancelled' : past ? 'past' : full ? 'full' : 'open'
   const canRegister = !past && !full && !event.cancelled
+
+  async function handleRegister() {
+    // Make sure they are logged in as a student!
+    if (currentUser.role !== 'student') {
+      setMessage({ type: 'error', text: 'You must be logged in as a student to register.' })
+      return
+    }
+
+    setLoading(true)
+    setMessage(null)
+
+    try {
+      const response = await fetch('/api/registrations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        // Use the real dynamically logged-in student's ID!
+        body: JSON.stringify({ eventId: event.id, studentId: currentUser.id }),
+      })
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Registration failed')
+      }
+
+      setMessage({ type: 'success', text: 'Successfully registered!' })
+      setLocalSeats((prev) => prev - 1)
+      
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.message })
+    } finally {
+      setLoading(false)
+    }
+  }
 
   return (
     <section className="shell" style={{ padding: '40px 0 64px' }}>
-      <Link
-        href="/events"
-        style={{ fontSize: 13.5, fontWeight: 600, textDecoration: 'none' }}
-      >
+      <Link href="/events" style={{ fontSize: 13.5, fontWeight: 600, textDecoration: 'none' }}>
         ← All events
       </Link>
 
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: '1.6fr 1fr',
-          gap: 32,
-          marginTop: 20,
-        }}
-        className="hero-grid"
-      >
+      <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr', gap: 32, marginTop: 20 }} className="hero-grid">
         <div>
           <span className="eyebrow-tag">{event.category}</span>
           <h1 style={{ fontSize: 32, marginTop: 12 }}>{event.name}</h1>
           <p style={{ marginTop: 16, fontSize: 15.5 }}>{event.description}</p>
         </div>
 
-        <aside
-          className="card-surface"
-          style={{
-            padding: 24,
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 14,
-            height: 'fit-content',
-          }}
-        >
+        <aside className="card-surface" style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 14, height: 'fit-content' }}>
           <StatusBadge status={status} />
           <Detail label="Date" value={formatDate(event.date)} />
           <Detail label="Time" value={formatTime(event.date)} />
           <Detail label="Venue" value={event.venue} />
-          <Detail
-            label="Seats"
-            value={`${event.seatsAvailable} of ${event.capacity} available`}
-          />
+          <Detail label="Seats" value={`${localSeats} of ${event.capacity} available`} />
 
-          {/* PARTICIPANT TASK (Task 2 — Registration): this button is a
-              placeholder. Wire it to a registration form and the
-              POST /api/registrations route, and make sure it respects
-              login state, duplicate registrations, full events, and
-              past/cancelled events. */}
           <button
             className="btn btn-primary"
-            disabled={!canRegister}
+            disabled={!canRegister || loading}
+            onClick={handleRegister}
             style={{ marginTop: 4 }}
-            title="Registration isn't wired up yet — that's Task 2"
           >
-            {canRegister
-              ? 'Register'
-              : status === 'full'
-                ? 'Event full'
-                : 'Registration closed'}
+            {loading ? 'Registering...' : canRegister ? 'Register' : status === 'full' ? 'Event full' : 'Registration closed'}
           </button>
+
+          {message && (
+            <div style={{ 
+              marginTop: 12, 
+              padding: '10px 14px', 
+              borderRadius: 6, 
+              fontSize: 14,
+              backgroundColor: message.type === 'success' ? '#e6f4ea' : '#fce8e6',
+              color: message.type === 'success' ? '#137333' : '#c5221f'
+            }}>
+              {message.text}
+            </div>
+          )}
         </aside>
       </div>
     </section>

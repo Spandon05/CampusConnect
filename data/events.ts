@@ -248,8 +248,15 @@ export function searchEventsByName(
   eventList: CampusEvent[],
   query: string,
 ): CampusEvent[] {
-  // TODO(participant): implement case-insensitive partial name search.
-  return eventList
+  if (!query) {
+    return eventList;
+  }
+  
+  const lowerCaseQuery = query.toLowerCase();
+  
+  return eventList.filter((event) =>
+    event.name.toLowerCase().includes(lowerCaseQuery)
+  );
 }
 
 /**
@@ -263,6 +270,96 @@ export function filterEventsByCategory(
   eventList: CampusEvent[],
   category: EventCategory | 'All',
 ): CampusEvent[] {
-  // TODO(participant): implement category filtering.
-  return eventList
+  if (category === 'All') {
+    return eventList;
+  }
+  
+  return eventList.filter((event) => event.category === category);
 }
+// ==========================================
+// TASK 4: ORGANIZER MANAGEMENT FUNCTIONS
+// ==========================================
+
+export function validateEventInput(data: any) {
+  if (!data.name || data.name.trim() === '') throw new Error('Event name is required.')
+  if (!data.venue || data.venue.trim() === '') throw new Error('Venue is required.')
+  if (!data.capacity || Number(data.capacity) <= 0) throw new Error('Capacity must be a positive number.')
+  if (!data.date) throw new Error('Date is required.')
+  
+  const eventDate = new Date(data.date)
+  if (isNaN(eventDate.getTime())) throw new Error('Invalid date format.')
+  if (eventDate <= new Date()) throw new Error('Event date must be in the future.')
+}
+
+export function createEvent(data: any, organizerId: string) {
+  validateEventInput(data)
+  
+  const newEvent = {
+    id: `evt-${Date.now()}`,
+    name: data.name,
+    description: data.description,
+    date: data.date,
+    venue: data.venue,
+    category: data.category,
+    capacity: Number(data.capacity),
+    seatsAvailable: Number(data.capacity),
+    organizerId: organizerId,
+    cancelled: false,
+  }
+  
+  events.push(newEvent)
+  return newEvent
+}
+
+export function updateEvent(id: string, data: any, organizerId: string) {
+  const event = events.find(e => e.id === id)
+  if (!event) throw new Error('Event not found')
+  if (event.organizerId !== organizerId) throw new Error('You can only edit your own events.')
+  
+  validateEventInput({ ...event, ...data })
+  
+  event.name = data.name
+  event.description = data.description
+  event.date = data.date
+  event.venue = data.venue
+  event.category = data.category
+  
+  if (data.capacity) {
+    const capacityDiff = Number(data.capacity) - event.capacity
+    event.capacity = Number(data.capacity)
+    event.seatsAvailable += capacityDiff
+  }
+  
+  return event
+}
+
+export function cancelEvent(id: string, organizerId: string) {
+  const event = events.find(e => e.id === id)
+  if (!event) throw new Error('Event not found')
+  if (event.organizerId !== organizerId) throw new Error('You can only cancel your own events.')
+  
+  event.cancelled = true
+  return event
+}
+// ==========================================
+// NEXT.JS MEMORY SPLIT-BRAIN FIX
+// ==========================================
+const g = globalThis as any;
+
+if (!g.sharedEvents) {
+  // If this is the first silo to load, set the global brain
+  g.sharedEvents = events;
+} else {
+  // If this is a secondary silo, clear its isolated memory and sync it with the global brain
+  events.length = 0;
+  events.push(...g.sharedEvents);
+}
+
+// Override the push method so future events automatically sync across all silos
+const originalPush = events.push.bind(events);
+events.push = (...args: any[]) => {
+  if (events !== g.sharedEvents) {
+    g.sharedEvents.push(...args);
+  }
+  return originalPush(...args);
+};

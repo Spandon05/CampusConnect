@@ -1,7 +1,12 @@
 'use client'
 
-import { useState } from 'react'
-import { events, EventCategory } from '@/data/events'
+import { useState, useEffect } from 'react'
+import { 
+  EventCategory, 
+  searchEventsByName, 
+  filterEventsByCategory,
+  isPastEvent 
+} from '@/data/events'
 import EventCard from '@/components/EventCard'
 
 const CATEGORIES: (EventCategory | 'All')[] = [
@@ -15,14 +20,26 @@ const CATEGORIES: (EventCategory | 'All')[] = [
 ]
 
 export default function EventsPage() {
-  // PARTICIPANT TASK (Task 1): these two pieces of state exist so the
-  // search box and category dropdown below are usable, but right now
-  // nothing actually reads them — the grid below always renders every
-  // event in `events`. Wire this up to `searchEventsByName` and
-  // `filterEventsByCategory` from data/events.ts, and make the two
-  // compose together.
   const [query, setQuery] = useState('')
   const [category, setCategory] = useState<EventCategory | 'All'>('All')
+  const [liveEvents, setLiveEvents] = useState<any[]>([])
+
+  useEffect(() => {
+    fetch('/api/events')
+      .then(res => res.json())
+      .then(data => {
+        if (data.events) {
+          setLiveEvents(data.events)
+        }
+      })
+      .catch(err => console.error('Failed to load live events:', err))
+  }, [])
+
+  // BUG 3 FIX: Filter out past events AND cancelled events
+  const upcomingEvents = liveEvents.filter((event) => !isPastEvent(event) && !event.cancelled);
+
+  const categoryFiltered = filterEventsByCategory(upcomingEvents, category);
+  const displayedEvents = searchEventsByName(categoryFiltered, query);
 
   return (
     <section className="shell" style={{ padding: '40px 0 64px' }}>
@@ -34,9 +51,7 @@ export default function EventsPage() {
         </p>
       </div>
 
-      <div
-        style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 24 }}
-      >
+      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 24 }}>
         <input
           type="search"
           placeholder="Search events by name…"
@@ -70,17 +85,23 @@ export default function EventsPage() {
         </select>
       </div>
 
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
-          gap: 16,
-        }}
-      >
-        {events.map((event) => (
-          <EventCard key={event.id} event={event} />
-        ))}
-      </div>
+      {displayedEvents.length > 0 ? (
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
+            gap: 16,
+          }}
+        >
+          {displayedEvents.map((event) => (
+            <EventCard key={event.id} event={event} />
+          ))}
+        </div>
+      ) : (
+        <div style={{ padding: '40px 0', textAlign: 'center' }}>
+          <p>{liveEvents.length === 0 ? 'Loading events...' : 'No upcoming events match your search.'}</p>
+        </div>
+      )}
     </section>
   )
 }
